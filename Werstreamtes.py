@@ -7,12 +7,25 @@ import re
 import requests
 import time
 from pathlib import Path
+from PIL import Image, ImageTk  # Add PIL import for image handling
 
 class CSVComparatorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("IMDB Werstreamt.es comparison tool")
         self.root.geometry("1200x700")
+        
+        # Set application icon
+        icon_path = os.path.join(os.path.dirname(__file__), "tarpan.ico")
+        if os.path.exists(icon_path):
+            try:
+                # Try to load icon using PIL
+                icon = Image.open(icon_path)
+                # Convert to PhotoImage
+                photo = ImageTk.PhotoImage(icon)
+                self.root.wm_iconphoto(True, photo)
+            except Exception as e:
+                print(f"Warning: Could not load icon: {e}")
         
         # Set theme - use the most modern looking theme available
         style = ttk.Style()
