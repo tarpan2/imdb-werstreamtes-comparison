@@ -94,11 +94,11 @@ class CSVComparatorApp:
         browse2_btn.grid(row=1, column=2, padx=(5, 10), pady=10)
         
         # Action buttons in a card-like frame
-        action_frame = ttk.Frame(self.main_frame, padding="10")
-        action_frame.pack(fill=tk.X, pady=(0, 15))
+        self.action_frame = ttk.Frame(self.main_frame, padding="10")
+        self.action_frame.pack(fill=tk.X, pady=(0, 15))
         
         # Button container with centered alignment
-        button_container = ttk.Frame(action_frame)
+        button_container = ttk.Frame(self.action_frame)
         button_container.pack(pady=5)
         
         load_btn = ttk.Button(button_container, text="Load & Compare Files", 
@@ -112,13 +112,15 @@ class CSVComparatorApp:
         # Progress bar (hidden by default)
         self.progress_frame = ttk.Frame(self.main_frame)
         self.progress_frame.pack(fill=tk.X, pady=(0, 15))
-        self.progress_frame.pack_forget()
         
-        self.progress_label = ttk.Label(self.progress_frame, text="Verifying entries...")
+        self.progress_label = ttk.Label(self.progress_frame, text="")
         self.progress_label.pack(fill=tk.X, padx=5, pady=(0, 5))
         
-        self.progress_bar = ttk.Progressbar(self.progress_frame, mode='determinate')
+        self.progress_bar = ttk.Progressbar(self.progress_frame, mode='determinate', length=300)
         self.progress_bar.pack(fill=tk.X, padx=5)
+        
+        # Hide progress frame initially
+        self.progress_frame.pack_forget()
         
         # Results section with a cleaner title and frame
         results_frame = ttk.LabelFrame(self.main_frame, text="Missing Movies", padding="10")
@@ -246,66 +248,74 @@ class CSVComparatorApp:
             # Get the missing entries
             self.missing_entries = self.file1_data[missing_mask].copy()
             
-            # Extract IMDB ID from URL if available
-            if 'URL' in self.missing_entries.columns:
+            # Update status with initial comparison results
+            initial_missing_count = len(self.missing_entries)
+            self.status_var.set(f"Found {initial_missing_count} potentially missing entries. Starting web verification...")
+            
+            # Extract IMDB ID from URL and verify only if we have missing entries
+            if len(self.missing_entries) > 0 and 'URL' in self.missing_entries.columns:
+                # Extract IMDB IDs first
                 self.missing_entries['IMDB ID'] = self.missing_entries['URL'].apply(self.extract_imdb_id)
                 
-                # Verify all entries
-                self.verify_missing_entries()
+                # Only verify entries that have a valid IMDB ID
+                entries_to_verify = self.missing_entries[self.missing_entries['IMDB ID'].str.len() > 0].copy()
+                if len(entries_to_verify) > 0:
+                    self.verify_missing_entries(entries_to_verify)
+                else:
+                    messagebox.showwarning("Warning", "No valid IMDB IDs found in the missing entries.")
             
             # Display results
             self.display_results(self.missing_entries)
             
-            # Update status
+            # Update final status
             missing_count = len(self.missing_entries)
             self.status_var.set(f"Found {missing_count} confirmed missing entries in IMDB.csv")
             
         except Exception as e:
             messagebox.showerror("Error", f"Error comparing files: {str(e)}")
     
-    def verify_missing_entries(self):
-        """Verify all missing entries by making web calls to Werstreamt.es."""
+    def verify_missing_entries(self, entries_to_verify):
+        """Verify missing entries by making web calls to Werstreamt.es."""
         try:
-            total_entries = len(self.missing_entries)
+            total_entries = len(entries_to_verify)
             
-            # Show progress bar
-            self.progress_frame.pack(fill=tk.X, pady=(0, 15))
+            # Show progress bar and ensure it's visible
+            self.progress_frame.pack(fill=tk.X, pady=(0, 15), after=self.action_frame)
             self.progress_bar['maximum'] = total_entries
             self.progress_bar['value'] = 0
-            self.progress_label['text'] = "Starting verification..."
-            self.root.update_idletasks()
+            self.progress_label['text'] = f"Starting verification of {total_entries} entries..."
+            self.root.update()
             
-            # Add a Verified column
-            self.missing_entries['Verified Missing'] = False
+            # Create a mask for entries that are actually missing
+            verified_missing_mask = pd.Series(False, index=self.missing_entries.index)
             
-            for idx, row in self.missing_entries.iterrows():
+            for idx, row in entries_to_verify.iterrows():
                 imdb_id = row['IMDB ID']
-                if imdb_id:  # Only check if we have an ID
-                    is_missing = self.verify_entry(imdb_id)
-                    self.missing_entries.at[idx, 'Verified Missing'] = is_missing
+                is_missing = self.verify_entry(imdb_id)
+                if is_missing:
+                    verified_missing_mask[idx] = True
                 
                 # Update progress safely
-                self.progress_bar['value'] = idx + 1
-                self.progress_label['text'] = f"Verifying entries... ({idx + 1}/{total_entries})"
-                self.root.update_idletasks()
+                current_progress = entries_to_verify.index.get_loc(idx) + 1
+                self.progress_bar['value'] = current_progress
+                self.progress_label['text'] = f"Verifying entries... ({current_progress}/{total_entries})"
+                self.root.update()
                 
                 # Add a small delay to avoid overwhelming the server
-                time.sleep(0.5)
+                time.sleep(0.05)
             
             # Filter out entries that were found on Werstreamt.es
-            self.missing_entries = self.missing_entries[self.missing_entries['Verified Missing']].copy()
-            # Drop the verification column as it's no longer needed
-            self.missing_entries = self.missing_entries.drop('Verified Missing', axis=1)
+            self.missing_entries = self.missing_entries[verified_missing_mask].copy()
             
             # Hide progress bar
             self.progress_frame.pack_forget()
-            self.root.update_idletasks()
+            self.root.update()
             
         except Exception as e:
             print(f"Error verifying entries: {str(e)}")  # Debug print
             messagebox.showerror("Error", f"Error verifying entries: {str(e)}")
             self.progress_frame.pack_forget()
-            self.root.update_idletasks()
+            self.root.update()
     
     def verify_entry(self, imdb_id):
         """Verify if an entry is missing from Werstreamt.es. Returns True if confirmed missing."""
